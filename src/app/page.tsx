@@ -1,101 +1,236 @@
-import Image from "next/image";
+'use client'
 
-export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+import { useState, useRef, useEffect } from "react"
+import { useSession, signIn } from "next-auth/react"
+import { Button } from "@/components/ui/button"
+import { Card } from "@/components/ui/card"
+import { Progress } from "@/components/ui/progress"
+import { Loader2, Music2, CheckCircle2, ImageIcon } from 'lucide-react'
+import { MOCK_FESTIVAL_RESPONSE, MOCK_SPOTIFY_RESPONSE, IS_PRODUCTION } from "@/lib/constants"
+import LoadingState from "@/components/loading-state"
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
-        </div>
-      </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
-  );
+function getMatchStatus(artist: string, topArtists: string[]) {
+  const exactMatch = topArtists.some(a => a.toLowerCase() === artist.toLowerCase())
+  return exactMatch ? 'exact' : 'none'
 }
+
+export default function HomePage() {
+  const { data: session, status } = useSession()
+  const [festivalArtists, setFestivalArtists] = useState<string[]>([])
+  const [matchPercentage, setMatchPercentage] = useState(0)
+  const [isUploading, setIsUploading] = useState(false)
+  const [topArtists, setTopArtists] = useState<string[]>([])
+  const [isConnecting, setIsConnecting] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const loadMockData = async () => {
+    setIsConnecting(true)
+    // Simulate API delay
+    await new Promise(resolve => setTimeout(resolve, 2000))
+    setTopArtists(MOCK_SPOTIFY_RESPONSE.topArtists)
+    setIsConnecting(false)
+  }
+  
+  useEffect(() => {
+    async function fetchTopArtists() {
+      if (session?.accessToken) {
+        try {
+          const firstResponse = await fetch(
+            'https://api.spotify.com/v1/me/top/artists?time_range=long_term&limit=50&offset=0',
+            {
+              headers: {
+                Authorization: `Bearer ${session.accessToken}`
+              }
+            }
+          )
+          const firstData = await firstResponse.json()
+
+          const secondResponse = await fetch(
+            'https://api.spotify.com/v1/me/top/artists?time_range=long_term&limit=50&offset=50',
+            {
+              headers: {
+                Authorization: `Bearer ${session.accessToken}`
+              }
+            }
+          )
+          const secondData = await secondResponse.json()
+
+          const allItems = [...firstData.items, ...secondData.items]
+          const artists = allItems.map((item: any) => item.name)
+          setTopArtists(artists)
+        } catch (error) {
+          console.error('Error fetching top artists:', error)
+          setTopArtists(MOCK_SPOTIFY_RESPONSE.topArtists)
+        }
+      }
+    }
+
+    if (status === "authenticated") {
+      fetchTopArtists()
+    }
+  }, [session, status])
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    setIsUploading(true)
+    await new Promise((resolve) => setTimeout(resolve, 2000))
+    setFestivalArtists(MOCK_FESTIVAL_RESPONSE.artists)
+
+    const matchedArtists = MOCK_FESTIVAL_RESPONSE.artists.filter(artist => 
+      topArtists.some(topArtist => topArtist.toLowerCase() === artist.toLowerCase())
+    )
+    const percentage = Math.round((matchedArtists.length / MOCK_FESTIVAL_RESPONSE.artists.length) * 100)
+    setMatchPercentage(percentage)
+
+    setIsUploading(false)
+  }
+
+  const triggerFileUpload = () => {
+    fileInputRef.current?.click()
+  }
+
+  return (
+    <main className="min-h-screen bg-gradient-to-b from-orange-50 via-red-50 to-purple-50">
+      <div className="container mx-auto px-4 py-16">
+        <div className="mx-auto max-w-6xl">
+          {/* Header */}
+          <div className="text-center mb-12">
+            <Music2 className="mx-auto h-16 w-16 text-purple-600" />
+            <h1 className="mt-8 text-4xl font-bold sm:text-6xl bg-gradient-to-r from-purple-600 to-orange-600 bg-clip-text text-transparent">
+              Should I go to this festival?
+            </h1>
+            <p className="mt-6 text-lg text-gray-600">
+              Connect with Spotify, show us a festival lineup, and we'll tell you if it's worth your time and money.
+            </p>
+          </div>
+
+          {/* Main Content */}
+          {(status === "loading" && IS_PRODUCTION) || isConnecting ? (
+            <LoadingState />
+          ) : !topArtists.length ? (
+            <div className="text-center">
+              <Button 
+                onClick={() => IS_PRODUCTION ? signIn("spotify") : loadMockData()} 
+                size="lg" 
+                className="bg-purple-600 hover:bg-purple-700"
+              >
+                Connect with Spotify
+              </Button>
+            </div>
+          ) : (
+            <>
+              {/* Spotify Connection Status */}
+              <div className="flex items-center justify-center gap-2 text-purple-600 mb-8">
+                <CheckCircle2 className="h-5 w-5" />
+                <span className="font-medium">
+                  {IS_PRODUCTION ? "Connected to Spotify" : "Using Test Data"}
+                </span>
+              </div>
+
+              {/* Two Panel Layout */}
+              <div className="grid gap-8 md:grid-cols-2">
+                {/* Left Panel - Your Artists */}
+                <Card className="p-6 border-purple-100 bg-white/80 backdrop-blur-sm">
+                  <h2 className="text-xl font-semibold mb-4 text-purple-900">Your Top Artists</h2>
+                  <ul className="space-y-2">
+                    {topArtists.map((artist) => (
+                      <li key={artist} className="rounded-lg bg-purple-50 p-3 text-purple-900">
+                        {artist}
+                      </li>
+                    ))}
+                  </ul>
+                </Card>
+
+                {/* Right Panel - Festival Upload */}
+                <Card className="p-6 border-orange-100 bg-white/80 backdrop-blur-sm">
+                  <h2 className="text-xl font-semibold mb-4 text-orange-900">Festival Lineup</h2>
+                  {isUploading ? (
+                    <div className="text-center py-8">
+                      <Loader2 className="mx-auto h-8 w-8 animate-spin text-orange-600" />
+                      <p className="mt-4 text-orange-900">Processing festival lineup...</p>
+                    </div>
+                  ) : festivalArtists.length === 0 ? (
+                    <div className="text-center py-8">
+                      <input
+                        type="file"
+                        ref={fileInputRef}
+                        onChange={handleFileUpload}
+                        accept="image/*"
+                        className="hidden"
+                      />
+                      <p className="mb-6 text-gray-600">Now upload a festival lineup to see if it's worth your time!</p>
+                      <Button 
+                        onClick={triggerFileUpload}
+                        size="lg"
+                        className="gap-2 bg-orange-600 hover:bg-orange-700"
+                      >
+                        <ImageIcon className="h-4 w-4" />
+                        Upload Festival Lineup
+                      </Button>
+                    </div>
+                  ) : (
+                    <ul className="space-y-2">
+                      {festivalArtists.map((artist) => {
+                        const matchStatus = getMatchStatus(artist, topArtists)
+                        return (
+                          <li
+                            key={artist}
+                            className={`rounded-lg p-3 ${
+                              matchStatus === 'exact'
+                                ? 'bg-gradient-to-r from-green-100 to-green-50 text-green-900'
+                                : 'bg-orange-50 text-orange-900'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span>{artist}</span>
+                              {matchStatus === 'exact' && (
+                                <CheckCircle2 className="h-4 w-4 text-green-600" />
+                              )}
+                            </div>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
+                </Card>
+              </div>
+
+              {/* Match Results */}
+              {festivalArtists.length > 0 && (
+                <Card className="mt-8 p-6 border-purple-100 bg-white/80 backdrop-blur-sm text-center">
+                  <h2 className="text-2xl font-bold text-purple-900">Match Score</h2>
+                  <div className="mt-4">
+                    <Progress 
+                      value={matchPercentage} 
+                      className="h-4 bg-purple-100" 
+                    />
+                    <p className="mt-4 text-4xl font-bold bg-gradient-to-r from-purple-600 to-orange-600 bg-clip-text text-transparent">
+                      {matchPercentage}%
+                    </p>
+                    <p className="mt-4 text-lg text-gray-600">
+                      {matchPercentage >= 70
+                        ? "Oh yeah, you'll definitely want to go! 🎉"
+                        : matchPercentage >= 40
+                        ? "Could be fun for discovering new music! 🎵"
+                        : "Might want to save your money for another festival... 💭"}
+                    </p>
+                  </div>
+                </Card>
+              )}
+            </>
+          )}
+
+          {/* Debug Mode Indicator */}
+          {!IS_PRODUCTION && (
+            <div className="fixed bottom-2 right-2 text-xs text-gray-500">
+              In debug/test mode
+            </div>
+          )}
+        </div>
+      </div>
+    </main>
+  )
+}
+
